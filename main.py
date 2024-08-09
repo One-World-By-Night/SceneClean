@@ -1,55 +1,73 @@
 import discord
 from discord.ext import commands
-import aiofiles
 import datetime
-import os
 import pytz
 import io
 
-TOKEN = 'YOUR_TOKEN_HERE'
+TOKEN = 'token goes here'
 
 intents = discord.Intents.default()
 intents.message_content = True  # Enable message content intent explicitly
 intents.messages = True          # Enable message-related events
+intents.members = True           # Enable member-related events to access display names
 
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-# Check if user is an admin
-def is_admin():
-    async def predicate(ctx):
-        return ctx.author.guild_permissions.administrator
-    return commands.check(predicate)
 
 @bot.event
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
 
-@bot.command(name='hello')
-async def hello(ctx):
-    print(f"Received command from {ctx.author}: {ctx.message.content}")  # Log the command received
-    await ctx.send('Hello, World!')
+def escape_discord_markdown(text):
+    # Escape Discord markdown characters to prevent formatting issues
+    return discord.utils.escape_markdown(text)
 
-@bot.command(name='end_scene')
-async def end_scene(ctx):
-    print(f"Received command from {ctx.author}: {ctx.message.content}")  # Log the command received
-    
+def indent_multiline_message(content, indent_length):
+    # Indent each line of a multi-line message
+    indent = ' ' * indent_length
+    return '\n'.join([indent + line if index > 0 else line for index, line in enumerate(content.splitlines())])
+
+async def generate_archive(ctx):
     messages = []
     members = set()
     first_message_date = None
     last_message_date = None
 
     async for message in ctx.channel.history(limit=None, oldest_first=True):
-        # Skip messages with attachments
-        if message.attachments:
+        # Skip messages from the bot itself
+        if message.author == bot.user:
             continue
+
+        # Fetch the correct display name (nickname) for the server
+        author_member = ctx.guild.get_member(message.author.id)
+        author_display_name = author_member.display_name if author_member else message.author.name
+        members.add(author_display_name)
+        
+        # Process message content
+        if message.attachments:
+            content = "[image]"
+        else:
+            content = escape_discord_markdown(message.content)
+
+            # Replace mentions with server-specific display names
+            for user in message.mentions:
+                member = ctx.guild.get_member(user.id)
+                if member:
+                    content = content.replace(f"<@{user.id}>", member.display_name)
+                else:
+                    content = content.replace(f"<@{user.id}>", user.name)
+
+        # Indent multi-line messages
+        content = indent_multiline_message(content, indent_length=22)
 
         # Set the date of the first message
         if not first_message_date:
             first_message_date = message.created_at
             
         last_message_date = message.created_at
-        members.add(message.author.display_name)  # Add member to the set
-        messages.append(f"{message.created_at.strftime('%Y-%m-%d %H:%M')} - {message.author.display_name}: {message.content}")
+
+        # Format each message with a timestamp, author's name, and the message content
+        formatted_message = f"{message.created_at.strftime('%Y-%m-%d %H:%M')} - {author_display_name}: {content}"
+        messages.append(formatted_message)
 
     # Create a summary of the archived messages
     date_covered = f"{first_message_date.strftime('%Y-%m-%d %H:%M')} to {last_message_date.strftime('%Y-%m-%d %H:%M')}"
@@ -62,21 +80,41 @@ async def end_scene(ctx):
         + '\n'.join(messages)
     )
     
- # Use an in-memory buffer to store the file content
+    # Use an in-memory buffer to store the file content
     file_buffer = io.BytesIO()
     file_buffer.write(output_text.encode('utf-8'))
     file_buffer.seek(0)
 
-    # Send the in-memory file as an attachment
-    dm_channel = await ctx.author.create_dm()
-    await dm_channel.send(file=discord.File(fp=file_buffer, filename="scene_archive.txt"))
+    return file_buffer
+
+@bot.command(name='end_scene')
+async def end_scene(ctx):
+    file_buffer = None  # Initialize file_buffer to None
+    try:
+        # Generate the archive
+        file_buffer = await generate_archive(ctx)
+
+        # Send the file in a DM
+        dm_channel = await ctx.author.create_dm()
+        await dm_channel.send(file=discord.File(fp=file_buffer, filename="scene_archive.txt"))
+
+        # Check if the bot posted anything to the channel
+        async for message in ctx.channel.history(limit=10):
+            if message.author == bot.user:
+                # Delete the message if it was posted to the channel
+                await message.delete()
+
+    except Exception as e:
+        # Notify the user if there's an error
+        await ctx.send(f"An error occurred while generating the archive: {str(e)}")
     
-    # Inform the user in the original channel that the archive has been sent
-    await ctx.send("The archive has been sent to your DM.")
-    print(f"Archived and sent all messages from {ctx.channel} to {ctx.author}'s DM")
+    finally:
+        # Clear the buffer after sending
+        if file_buffer:
+            file_buffer.close()
 
 @bot.command(name='scene_wrap')
-@is_admin()
+@commands.has_permissions(administrator=True)
 async def scene_wrap(ctx, channel_name: str = None):
     if not channel_name:
         await ctx.send("Please provide the name of the channel you want to archive messages to. Usage: `!scene_wrap <channel_name>`")
@@ -88,44 +126,24 @@ async def scene_wrap(ctx, channel_name: str = None):
         await ctx.send(f"Channel {channel_name} not found.")
         return
     
-    messages = []
-    members = set()
-    first_message_date = None
-    last_message_date = None
-
-    async for message in ctx.channel.history(limit=None, oldest_first=True):
-        # Skip messages with attachments
-        if message.attachments:
-            continue
+    file_buffer = None  # Initialize file_buffer to None
+    try:
+        file_buffer = await generate_archive(ctx)
         
-        # Set the date of the first message
-        if not first_message_date:
-            first_message_date = message.created_at
-            
-        last_message_date = message.created_at
-        members.add(message.author.display_name)  # Add member to the set
-        messages.append(f"{message.created_at.strftime('%Y-%m-%d %H:%M')} - {message.author.display_name}: {message.content}")
+        # Send the archive to the target channel
+        await target_channel.send(file=discord.File(fp=file_buffer, filename="scene_archive.txt"))
 
-    # Create a summary of the archived messages
-    date_covered = f"{first_message_date.strftime('%Y-%m-%d %H:%M')} to {last_message_date.strftime('%Y-%m-%d %H:%M')}"
-    members_list = ', '.join(sorted(members))
-    
-    output_text = (
-        f"**Channel:** {ctx.channel.name}\n"
-        f"**Dates Covered:** {date_covered}\n"
-        f"**Members:** {members_list}\n\n"
-        + '\n'.join(messages)
-    )
-    
- # Use an in-memory buffer to store the file content
-    file_buffer = io.BytesIO()
-    file_buffer.write(output_text.encode('utf-8'))
-    file_buffer.seek(0)
-    
-    # Send the archive to the target channel
-    await target_channel.send(file=discord.File(fp=file_buffer, filename="scene_archive.txt"))
+        # Notify that the messages have been archived
+        await ctx.send("Messages have been archived and posted.")
 
-    await ctx.send("Messages have been archived and posted.")
+    except Exception as e:
+        # Notify the user if there's an error
+        await ctx.send(f"An error occurred while generating the archive: {str(e)}")
+    
+    finally:
+        # Clear the buffer after sending
+        if file_buffer:
+            file_buffer.close()
 
     # Bulk delete messages younger than 14 days and delete older ones individually
     utc = pytz.UTC
