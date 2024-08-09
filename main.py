@@ -168,5 +168,22 @@ async def scene_wrap(ctx, channel_name: str = None):
     # Individually delete messages older than 14 days
     for message in messages_to_delete_individual:
         await message.delete()
+        
+@bot.command(name='help_scene_clean')
+async def help_scene_clean(ctx):
+    help_text = """
+    **Scene Clean Bot Help**
 
+    **Commands:**
+    1. `!end_scene`: Archives the current channel's messages and sends the archive to your DM.
+    2. `!scene_wrap <channel_name>`: Archives messages from the current channel and sends them to the specified channel. Requires administrator permissions.
+
+    **Usage Examples:**
+    - `!end_scene`: Use this to archive the messages in the channel and receive them via DM.
+    - `!scene_wrap archive_channel`: Archives messages and posts the archive in `#archive_channel`.
+    
+    **Note:** Only administrators can use `!scene_wrap`.
+    """
+    await ctx.send(help_text)
+    
 bot.run(TOKEN)
