@@ -471,7 +471,7 @@ async def set_default_wrap_channel(ctx, channel_name: str):
 
 @bot.command(name='scene_wrap')
 async def scene_wrap(ctx, channel_name: str = None):
-    # Check if the user has the 'manage_channels' permission in the current channel
+    # Custom permission check: Only users with `manage_channels` permission can use this command
     if not ctx.channel.permissions_for(ctx.author).manage_channels:
         await ctx.author.send("You do not have permission to use this command in this channel.")
         await ctx.message.add_reaction("📬")
@@ -541,8 +541,6 @@ async def scene_wrap(ctx, channel_name: str = None):
 
     for message in messages_to_delete_individual:
         await message.delete()
-
-
         
 @bot.command(name='archive_and_delete_scene')
 @commands.has_permissions(manage_channels=True)
