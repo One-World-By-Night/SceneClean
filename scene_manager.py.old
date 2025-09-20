@@ -67,32 +67,43 @@ async def generate_archive(ctx):
     last_message_date = None
 
     async for message in ctx.channel.history(limit=None, oldest_first=True):
+        # Skip messages from the bot itself
         if message.author == bot.user:
             continue
 
+        # Fetch the correct display name (nickname) for the server
         author_member = ctx.guild.get_member(message.author.id)
         author_display_name = author_member.display_name if author_member else message.author.name
         members.add(author_display_name)
         
-        content = "[image]" if message.attachments else escape_discord_markdown(message.content)
-        
-        for user in message.mentions:
-            member = ctx.guild.get_member(user.id)
-            if member:
-                content = content.replace(f"<@{user.id}>", member.display_name)
-            else:
-                content = content.replace(f"<@{user.id}>", user.name)
+        # Process message content
+        if message.attachments:
+            content = "[image]"
+        else:
+            content = escape_discord_markdown(message.content)
 
+            # Replace mentions with server-specific display names
+            for user in message.mentions:
+                member = ctx.guild.get_member(user.id)
+                if member:
+                    content = content.replace(f"<@{user.id}>", member.display_name)
+                else:
+                    content = content.replace(f"<@{user.id}>", user.name)
+
+        # Indent multi-line messages
         content = indent_multiline_message(content, indent_length=22)
 
+        # Set the date of the first message
         if not first_message_date:
             first_message_date = message.created_at
             
         last_message_date = message.created_at
 
+        # Format each message with a timestamp, author's name, and the message content
         formatted_message = f"{message.created_at.strftime('%Y-%m-%d %H:%M')} - {author_display_name}: {content}"
         messages.append(formatted_message)
 
+    # Create a summary of the archived messages
     date_covered = f"{first_message_date.strftime('%Y-%m-%d %H:%M')} to {last_message_date.strftime('%Y-%m-%d %H:%M')}"
     members_list = ', '.join(sorted(members))
     
@@ -102,18 +113,13 @@ async def generate_archive(ctx):
         f"**Members:** {members_list}\n\n"
         + '\n'.join(messages)
     )
-
+    
+    # Use an in-memory buffer to store the file content
     file_buffer = io.BytesIO()
     file_buffer.write(output_text.encode('utf-8'))
     file_buffer.seek(0)
 
-    # Generate a dynamic file name using server, channel, and date
-    server_name = ctx.guild.name.replace(" ", "_").replace("/", "_")
-    channel_name = ctx.channel.name.replace(" ", "_").replace("/", "_")
-    current_date = datetime.datetime.now().strftime("%Y%m%d")
-    file_name = f"{server_name}_{channel_name}_{current_date}.txt"
-
-    return file_buffer, file_name
+    return file_buffer
 
 # Command to set the required role for using the bot
 @bot.command(name='set_required_role')
@@ -157,7 +163,7 @@ async def has_required_role(ctx):
 @bot.command(name='create_scene')
 async def create_scene(ctx, channel_name: str, *members_and_roles: str):
     # Add reaction to indicate that the command was received
-    await ctx.message.add_reaction("📬")
+    await ctx.message.add_reaction("✅")
 
     # Ensure the command is being used in a server (guild)
     if ctx.guild is None:
@@ -228,6 +234,10 @@ async def create_scene(ctx, channel_name: str, *members_and_roles: str):
     # Add a reaction to indicate successful completion
     await ctx.message.add_reaction("✅")
 
+
+
+# Other commands would also include the `has_required_role` check as needed...
+
 # Command to set the ST role
 @bot.command(name='set_st_role')
 @commands.has_permissions(administrator=True)
@@ -290,7 +300,7 @@ async def get_scene_limit(ctx):
 @bot.command(name='add_user_to_scene')
 async def add_user_to_scene(ctx, channel_name: str, *members_and_roles: str):
     # Add reaction to indicate that the command was received
-    await ctx.message.add_reaction("📬")
+    await ctx.message.add_reaction("✅")
     
     # Ensure the command is being used in a server (guild)
     if ctx.guild is None:
@@ -338,10 +348,13 @@ async def add_user_to_scene(ctx, channel_name: str, *members_and_roles: str):
     else:
         await ctx.author.send(f"No valid members or roles were found for the provided inputs.")
 
+
+    category_name = "Scene Manager"
+
 @bot.command(name='remove_user_from_scene')
 async def remove_user_from_scene(ctx, channel_name: str, *members_and_roles: str):
     # Add reaction to indicate that the command was received
-    await ctx.message.add_reaction("📬")
+    await ctx.message.add_reaction("✅")
     
     # Ensure the command is being used in a server (guild)
     if ctx.guild is None:
@@ -398,17 +411,18 @@ async def remove_user_from_scene(ctx, channel_name: str, *members_and_roles: str
     if not removed_items and not not_found_items:
         await ctx.author.send(f"No valid members or roles were found for the provided inputs.")
 
+
 # Command to archive the current channel and send the archive via DM
 @bot.command(name='end_scene')
 async def end_scene(ctx):
-    file_buffer, file_name = None, None  # Initialize file_buffer and file_name to None
+    file_buffer = None  # Initialize file_buffer to None
     try:
         # Generate the archive
-        file_buffer, file_name = await generate_archive(ctx)
+        file_buffer = await generate_archive(ctx)
 
         # Send the file in a DM
         dm_channel = await ctx.author.create_dm()
-        await dm_channel.send(file=discord.File(fp=file_buffer, filename=file_name))
+        await dm_channel.send(file=discord.File(fp=file_buffer, filename="scene_archive.txt"))
         await ctx.message.add_reaction("📬")  # Add an envelope reaction to the user's command message
 
         # Check if the bot posted anything to the channel
@@ -426,6 +440,7 @@ async def end_scene(ctx):
         # Clear the buffer after sending
         if file_buffer:
             file_buffer.close()
+
 
 @bot.command(name='set_default_wrap_channel')
 @commands.has_permissions(administrator=True)
@@ -453,12 +468,14 @@ async def set_default_wrap_channel(ctx, channel_name: str):
         await ctx.message.add_reaction("📬")  # Add an envelope reaction to the user's command message
         print(f"Error in set_default_wrap_channel command: {str(e)}")
 
+
 @bot.command(name='scene_wrap')
+@commands.has_permissions(administrator=True)
 async def scene_wrap(ctx, channel_name: str = None):
-    # Custom permission check: Only users with `manage_channels` permission can use this command
-    if not ctx.channel.permissions_for(ctx.author).manage_channels:
+    # Check if the user has the 'manage_channels' permission in the current channel
+    if not ctx.channel.permissions_for(ctx.author).manage_channels and not ctx.author.guild_permissions.administrator:
         await ctx.author.send("You do not have permission to use this command in this channel.")
-        await ctx.message.add_reaction("📬")
+        await ctx.message.add_reaction("✅")
         return
     
     if not channel_name:
@@ -469,36 +486,36 @@ async def scene_wrap(ctx, channel_name: str = None):
             default_channel = bot.get_channel(result[0])
             if not default_channel:
                 await ctx.author.send("The default channel set for archiving is not found. Please set a valid default channel.")
-                await ctx.message.add_reaction("📬")
+                await ctx.message.add_reaction("✅")
                 return
             channel_name = default_channel.name
         else:
             await ctx.author.send("Please provide the name of the channel you want to archive messages to. Usage: `!scene_wrap <channel_name>`")
-            await ctx.message.add_reaction("📬")
+            await ctx.message.add_reaction("✅")
             return
 
     # Get the target channel by name
     target_channel = discord.utils.get(ctx.guild.channels, name=channel_name)
     if not target_channel:
         await ctx.author.send(f"Channel {channel_name} not found.")
-        await ctx.message.add_reaction("📬")
+        await ctx.message.add_reaction("✅")
         return
     
-    file_buffer, file_name = None, None
+    file_buffer = None
     try:
-        file_buffer, file_name = await generate_archive(ctx)
+        file_buffer = await generate_archive(ctx)
         
         # Send the archive to the target channel
-        await target_channel.send(file=discord.File(fp=file_buffer, filename=file_name))
+        await target_channel.send(file=discord.File(fp=file_buffer, filename="scene_archive.txt"))
 
         # Notify that the messages have been archived
         await ctx.author.send("Messages have been archived and posted.")
-        await ctx.message.add_reaction("📬")
+        await ctx.message.add_reaction("✅")
 
     except Exception as e:
         # Notify the user if there's an error
         await ctx.author.send(f"An error occurred while generating the archive: {str(e)}")
-        await ctx.message.add_reaction("📬")
+        await ctx.message.add_reaction("✅")
     
     finally:
         # Clear the buffer after sending
@@ -526,14 +543,13 @@ async def scene_wrap(ctx, channel_name: str = None):
     for message in messages_to_delete_individual:
         await message.delete()
 
+        
 @bot.command(name='archive_and_delete_scene')
 @commands.has_permissions(manage_channels=True)
 async def archive_and_delete_scene(ctx):
-    # Add reaction to indicate that the command was received
-    await ctx.message.add_reaction("📬")
-    
+    await ctx.message.add_reaction("📩")  # Envelope emoji
     # Ensure the command is being used in a Scene Manager category
-    if ctx.channel.category.name != "Scene Manager":
+    if not ctx.channel.category or ctx.channel.category.name != "Scene Manager":
         await ctx.author.send("This command can only be used in channels under the 'Scene Manager' category.")
         return
 
@@ -561,24 +577,32 @@ async def archive_and_delete_scene(ctx):
         return
 
     # Generate the archive
-    file_buffer, file_name = None, None
     try:
-        file_buffer, file_name = await generate_archive(ctx)
-        
+        file_buffer = await generate_archive(ctx)
+        archive_data = file_buffer.getvalue()
+
         # Send the archive to the default archive channel
-        await default_archive_channel.send(file=discord.File(fp=file_buffer, filename=file_name))
+        file_buffer.seek(0)
+        await default_archive_channel.send(file=discord.File(fp=file_buffer, filename=f"{ctx.channel.name}_archive.txt"))
 
         # Send the archive via DM to each member with access to the channel, excluding bots and those with the ST role
-        members_with_access = [member for member in ctx.channel.members if member != bot.user and not member.bot and (st_role not in member.roles if st_role else True)]
+        members_with_access = [
+            member for member in ctx.channel.members
+            if member != bot.user and not member.bot and (st_role not in member.roles if st_role else True)
+        ]
         for member in members_with_access:
             try:
+                # Create a new buffer for each DM
+                dm_buffer = io.BytesIO(archive_data)
+                dm_buffer.seek(0)
                 dm_channel = await member.create_dm()
-                await dm_channel.send(file=discord.File(fp=file_buffer, filename=file_name))
+                await dm_channel.send(file=discord.File(fp=dm_buffer, filename=f"{ctx.channel.name}_archive.txt"))
+                dm_buffer.close()
             except Exception as dm_error:
                 await ctx.author.send(f"Failed to send archive to {member.mention}: {str(dm_error)}")
 
         await ctx.author.send("The archive has been sent to the default archive channel and DMed to each applicable member. The channel will be deleted shortly.")
-        await ctx.message.add_reaction("✅")
+        await ctx.message.add_reaction("✅")  # Checkmark emoji
 
     except Exception as e:
         await ctx.author.send(f"An error occurred while archiving the channel: {str(e)}")
@@ -594,40 +618,8 @@ async def archive_and_delete_scene(ctx):
     except Exception as delete_error:
         await ctx.author.send(f"Failed to delete the channel: {str(delete_error)}")
 
-# Command to check current Scene Manager settings
-@bot.command(name='check_scene_manager_settings')
-@commands.has_permissions(administrator=True)
-async def check_scene_manager_settings(ctx):
-    guild_id = ctx.guild.id
 
-    # Fetch current settings from the database
-    cursor.execute('SELECT channel_limit FROM scene_limits WHERE server_id = ?', (guild_id,))
-    scene_limit = cursor.fetchone()
-    scene_limit = scene_limit[0] if scene_limit else "Not set"
 
-    cursor.execute('SELECT channel_id FROM default_channels WHERE server_id = ?', (guild_id,))
-    default_channel = cursor.fetchone()
-    default_channel = bot.get_channel(default_channel[0]).name if default_channel else "Not set"
-
-    cursor.execute('SELECT role_id FROM st_roles WHERE server_id = ?', (guild_id,))
-    st_role = cursor.fetchone()
-    st_role = ctx.guild.get_role(st_role[0]).name if st_role else "Not set"
-
-    cursor.execute('SELECT role_id FROM required_roles WHERE server_id = ?', (guild_id,))
-    required_role = cursor.fetchone()
-    required_role = ctx.guild.get_role(required_role[0]).name if required_role else "Not set"
-
-    # Construct the settings report
-    settings_report = (
-        f"**Scene Manager Settings for {ctx.guild.name}:**\n"
-        f"**Scene Limit:** {scene_limit}\n"
-        f"**Default Archive Channel:** {default_channel}\n"
-        f"**ST Role:** {st_role}\n"
-        f"**Required Role for Bot Usage:** {required_role}\n"
-    )
-
-    await ctx.author.send(settings_report)
-    await ctx.message.add_reaction("📬")  # Add an envelope reaction to the user's command message
 
 # Command to provide help information for scene management commands
 @bot.command(name='help_scene_manager')
@@ -645,10 +637,11 @@ async def help_scene_manager(ctx):
     **Admin Commands:**
     1. `!scene_wrap <channel_name>`: Archives messages from the current channel and sends them to the specified channel. If no channel is specified, it will use the default channel. It then deletes all non-pinned messages. A user needs "manage channel" permissions to use this.
     2. `!set_scene_limit <limit>`: Sets the maximum number of channels allowed in the "Scene Manager" category. The create_scene command will not function unless you set some value here.
-    3. `!set_default_wrap_channel <channel_name>`: Sets a default channel for `!scene_wrap` to use when no channel is specified.
-    4. `!set_st_role <role_name>`: Sets a default "ST role" that will automatically be added to every channel created with `!create_scene`.
-    5. `!set_required_role <role_name>`: Sets a required role for using the Scene Manager bot. Users without this role cannot use the bot's commands.
-    6. `!check_scene_manager_settings`: Displays the current configuration settings for the Scene Manager bot.
+    3. `!get_scene_limit`: Displays the current channel limit for the "Scene Manager" category.
+    4. `!set_default_wrap_channel <channel_name>`: Sets a default channel for `!scene_wrap` to use when no channel is specified.
+    5. `!set_st_role <role_name>`: Sets a default "ST role" that will automatically be added to every channel created with `!create_scene`.
+    6. `!set_required_role <role_name>`: Sets a required role for using the Scene Manager bot. Users without this role cannot use the bot's commands.
+    7. `!check_scene_manager_settings`: Displays the current configuration settings for the Scene Manager bot.
     """
 
     usage_examples = """
@@ -670,7 +663,8 @@ async def help_scene_manager(ctx):
 
     for text in help_texts:
         await ctx.author.send(text)
-        await ctx.message.add_reaction("📬")  # Add an envelope reaction to the user's command message
+        await ctx.message.add_reaction("📩") # Add an envelope reaction to the user's command message
+
 
 # Load the bot token from the config file
 def load_token():
@@ -682,6 +676,5 @@ def load_token():
 @bot.event
 async def on_close():    
     conn.close()
-
 token = load_token()
 bot.run(token)
